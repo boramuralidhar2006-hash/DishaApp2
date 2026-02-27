@@ -52,9 +52,17 @@ const HomeScreen = ({ navigation }) => {
     };
   }, []);
 
+  // ← MODIFIED: check role and redirect volunteer
   const loadUser = async () => {
     const userData = await AsyncStorage.getItem('disha_user');
-    if (userData) setUser(JSON.parse(userData));
+    if (userData) {
+      const parsed = JSON.parse(userData);
+      setUser(parsed);
+      // If a volunteer lands on HomeScreen, redirect them to VolunteerDashboard
+      if (parsed.role === 'volunteer') {
+        navigation.replace('VolunteerDashboard');
+      }
+    }
   };
 
   // Shake Detection using Accelerometer
@@ -64,20 +72,17 @@ const HomeScreen = ({ navigation }) => {
       accelerometer.subscribe(({ x, y, z }) => {
         const magnitude = Math.sqrt(x * x + y * y + z * z);
         const now = Date.now();
-        // Detect shake: magnitude > 18 and at least 200ms since last shake
         if (magnitude > 18 && now - lastShakeRef.current > 200) {
           lastShakeRef.current = now;
           shakeCountRef.current += 1;
           setShakeCount(shakeCountRef.current);
 
-          // Reset shake count after 2 seconds of no shaking
           if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
           shakeTimerRef.current = setTimeout(() => {
             shakeCountRef.current = 0;
             setShakeCount(0);
           }, 2000);
 
-          // Trigger SOS after 5 shakes
           if (shakeCountRef.current >= 5) {
             shakeCountRef.current = 0;
             setShakeCount(0);
@@ -95,7 +100,6 @@ const HomeScreen = ({ navigation }) => {
     if (sosActive) return;
     setSosActive(true);
     Vibration.vibrate([500, 500, 500, 500, 500]);
-
     navigation.navigate('SOSAlert', { triggerType: type, user });
     setTimeout(() => setSosActive(false), 5000);
   };
@@ -116,12 +120,12 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const quickActions = [
-    { icon: '👥', label: 'Emergency\nContacts', screen: 'Contacts', color: '#4CAF50' },
-    { icon: '📍', label: 'Track My\nTravel', screen: 'Track', color: '#2196F3' },
-    { icon: '🏥', label: 'Nearby\nServices', screen: 'Nearby', color: '#FF9800' },
-    { icon: '📋', label: 'File\nComplaint', screen: 'Complaint', color: '#9C27B0' },
-    { icon: '📞', label: 'Helplines', screen: 'Helpline', color: '#F44336' },
-    { icon: '🩸', label: 'Blood\nBanks', screen: 'Nearby', color: '#E91E63' },
+    { icon: '👥', label: 'Emergency\nContacts', screen: 'Contacts',  color: '#4CAF50' },
+    { icon: '📍', label: 'Track My\nTravel',    screen: 'Track',     color: '#2196F3' },
+    { icon: '🏥', label: 'Nearby\nServices',    screen: 'Nearby',    color: '#FF9800' },
+    { icon: '📋', label: 'File\nComplaint',     screen: 'Complaint', color: '#9C27B0' },
+    { icon: '📞', label: 'Helplines',           screen: 'Helpline',  color: '#F44336' },
+    { icon: '🩸', label: 'Blood\nBanks',        screen: 'Nearby',    color: '#E91E63' },
   ];
 
   return (
@@ -227,7 +231,7 @@ const HomeScreen = ({ navigation }) => {
         <Text style={styles.sectionTitle}>Safety Tip 💡</Text>
         <View style={styles.tipCard}>
           <Text style={styles.tipText}>
-            Always inform a trusted person about your whereabouts. Use the 
+            Always inform a trusted person about your whereabouts. Use the
             "Track My Travel" feature when traveling alone at night.
           </Text>
         </View>

@@ -22,6 +22,9 @@ const RegisterScreen = ({ navigation }) => {
     bloodGroup: '',
   });
 
+  // ← ADDED: volunteer toggle state
+  const [isVolunteer, setIsVolunteer] = useState(false);
+
   const genderOptions = ['Female', 'Male', 'Other'];
   const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 
@@ -35,11 +38,20 @@ const RegisterScreen = ({ navigation }) => {
       return;
     }
     try {
-      await AsyncStorage.setItem('disha_user', JSON.stringify(form));
+      // ← MODIFIED: save role along with form data
+      const userData = { ...form, role: isVolunteer ? 'volunteer' : 'user' };
+      await AsyncStorage.setItem('disha_user', JSON.stringify(userData));
+
       Alert.alert(
         'Registration Successful! 🎉',
-        `Welcome ${form.name}! You are now registered with Disha Safety App.`,
-        [{ text: 'Proceed', onPress: () => navigation.replace('MainApp') }]
+        `Welcome ${form.name}! You are now registered as a ${isVolunteer ? 'Volunteer 🛡️' : 'User'}.`,
+        [{
+          text: 'Proceed',
+          // ← MODIFIED: navigate based on role
+          onPress: () => isVolunteer
+            ? navigation.replace('VolunteerDashboard')
+            : navigation.replace('MainApp'),
+        }]
       );
     } catch (error) {
       Alert.alert('Error', 'Registration failed. Please try again.');
@@ -153,6 +165,25 @@ const RegisterScreen = ({ navigation }) => {
             ))}
           </View>
 
+          {/* ← ADDED: Volunteer Toggle */}
+          <View style={styles.volunteerRow}>
+            <TouchableOpacity
+              style={[
+                styles.checkbox,
+                isVolunteer && styles.checkboxActive,
+              ]}
+              onPress={() => setIsVolunteer(!isVolunteer)}
+            >
+              {isVolunteer && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </TouchableOpacity>
+            <Text style={styles.volunteerLabel}>Register as Volunteer 🛡️</Text>
+          </View>
+          <Text style={styles.volunteerHint}>
+            Check this if you want to help respond to SOS alerts
+          </Text>
+
           {/* Register Button */}
           <TouchableOpacity style={styles.registerBtn} onPress={handleRegister}>
             <Text style={styles.registerBtnText}>REGISTER NOW 🛡️</Text>
@@ -243,12 +274,51 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
+
+  // ← ADDED: Volunteer toggle styles
+  volunteerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 25,
+    marginBottom: 5,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: '#8B0000',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  checkboxActive: {
+    backgroundColor: '#8B0000',
+  },
+  checkmark: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  volunteerLabel: {
+    fontSize: 15,
+    color: '#333',
+    fontWeight: '600',
+  },
+  volunteerHint: {
+    color: '#888',
+    fontSize: 12,
+    marginBottom: 10,
+    marginLeft: 34,
+  },
+
   registerBtn: {
     backgroundColor: '#8B0000',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 30,
+    marginTop: 20,
     elevation: 4,
     shadowColor: '#8B0000',
     shadowOffset: { width: 0, height: 4 },
