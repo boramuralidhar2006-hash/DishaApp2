@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, FlatList, Video } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { collection, onSnapshot } from "firebase/firestore";
-import { db } from "../firebase"; // we will create this
+import { db } from "../firebase.js"; // we will create this
 
 export default function VolunteerDashboard() {
   const [sosData, setSosData] = useState([]);
