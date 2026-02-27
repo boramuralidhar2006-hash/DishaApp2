@@ -1,4 +1,4 @@
-import React from 'react';
+ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text } from 'react-native';
@@ -13,7 +13,6 @@ import NearbyServicesScreen from '../screens/NearbyServicesScreen';
 import ComplaintScreen from '../screens/ComplaintScreen';
 import SOSAlertScreen from '../screens/SOSAlertScreen';
 import HelplineScreen from '../screens/HelplineScreen';
-import VolunteerDashboard       from '../screens/VolunteerDashboard';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -77,8 +76,6 @@ const MainNavigator = () => {
         options={{ presentation: 'fullScreenModal' }}
       />
       <Stack.Screen name="Helpline" component={HelplineScreen} />
-      <Stack.Screen name="VolunteerDashboard" component={VolunteerDashboard} />
-
     </Stack.Navigator>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+ import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -10,410 +10,504 @@ import {
   Linking,
   Animated,
   Easing,
-} from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { accelerometer, setUpdateIntervalForType, SensorTypes } from 'react-native-sensors';
+  Dimensions,
+  StatusBar,
+  PermissionsAndroid,
+  Platform,
+} from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Geolocation from "@react-native-community/geolocation";
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const SOS_R = Math.floor(SCREEN_WIDTH * 0.38);
 
 const HomeScreen = ({ navigation }) => {
   const [user, setUser] = useState(null);
   const [sosActive, setSosActive] = useState(false);
-  const [shakeCount, setShakeCount] = useState(0);
+  const [location, setLocation] = useState(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const shakeCountRef = useRef(0);
-  const shakeTimerRef = useRef(null);
-  const lastShakeRef = useRef(0);
 
-  // SOS Pulse Animation
+  useEffect(() => {
+    loadUser();
+    requestLocationPermission();
+    startPulse();
+  }, []);
+
+  const loadUser = async () => {
+    try {
+      const data = await AsyncStorage.getItem("disha_user");
+      if (data) setUser(JSON.parse(data));
+    } catch (_) {}
+  };
+
   const startPulse = () => {
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
-          toValue: 1.15,
-          duration: 600,
-          easing: Easing.ease,
+          toValue: 1.08,
+          duration: 800,
+          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
         Animated.timing(pulseAnim, {
           toValue: 1,
-          duration: 600,
-          easing: Easing.ease,
+          duration: 800,
+          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
-      ])
+      ]),
     ).start();
   };
 
-  useEffect(() => {
-    startPulse();
-    loadUser();
-    setupShakeDetection();
-    return () => {
-      // Cleanup
-    };
-  }, []);
+  const requestLocationPermission = async () => {
+    if (Platform.OS === "android") {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: "Disha Location Permission",
+            message: "Disha needs your location for SOS alerts.",
+            buttonPositive: "Allow",
+            buttonNegative: "Deny",
+          },
+        );
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) fetchLocation();
+      } catch (err) {
+        console.warn(err);
+      }
+    } else {
+      fetchLocation();
+    }
+  };
 
-  // ← MODIFIED: check role and redirect volunteer
-  const loadUser = async () => {
-    const userData = await AsyncStorage.getItem('disha_user');
-    if (userData) {
-      const parsed = JSON.parse(userData);
-      setUser(parsed);
-      // If a volunteer lands on HomeScreen, redirect them to VolunteerDashboard
-      if (parsed.role === 'volunteer') {
-        navigation.replace('VolunteerDashboard');
+  const fetchLocation = () => {
+    Geolocation.getCurrentPosition(
+      (pos) =>
+        setLocation({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        }),
+      (err) => console.log("Location error:", err),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 },
+    );
+  };
+
+  const getLocationLink = () => {
+    if (location)
+      return `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
+    return "Location unavailable";
+  };
+
+  const getEmergencyContacts = async () => {
+    try {
+      const data = await AsyncStorage.getItem("emergency_contacts");
+      return data ? JSON.parse(data) : [];
+    } catch (_) {
+      return [];
+    }
+  };
+
+  const callAllContacts = (contacts) => {
+    contacts.forEach((contact, i) => {
+      const phone = contact.phone || contact.number;
+      if (phone) {
+        setTimeout(() => {
+          Linking.openURL(`tel:${phone}`).catch((err) =>
+            console.log(`Call failed:`, err),
+          );
+        }, i * 4000);
+      }
+    });
+  };
+
+  const sendSMSAlerts = async (contacts) => {
+    const locationLink = getLocationLink();
+    const message =
+      `🚨 SOS ALERT from ${user?.name || "Disha User"}!\n` +
+      `I need immediate help.\n` +
+      `📍 My Location: ${locationLink}\n` +
+      `Please contact me or send help immediately.\n` +
+      `- Sent via Disha Safety App`;
+
+    for (const contact of contacts) {
+      const phone = contact.phone || contact.number;
+      if (phone) {
+        try {
+          const ACCOUNT_SID = "YOUR_TWILIO_ACCOUNT_SID";
+          const AUTH_TOKEN = "YOUR_TWILIO_AUTH_TOKEN";
+          const FROM_NUMBER = "YOUR_TWILIO_PHONE_NUMBER";
+          await fetch(
+            `https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: "Basic " + btoa(`${ACCOUNT_SID}:${AUTH_TOKEN}`),
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: `To=%2B91${phone}&From=${FROM_NUMBER}&Body=${encodeURIComponent(message)}`,
+            },
+          );
+        } catch (err) {
+          console.log("SMS failed:", err);
+        }
       }
     }
   };
 
-  // Shake Detection using Accelerometer
-  const setupShakeDetection = () => {
-    try {
-      setUpdateIntervalForType(SensorTypes.accelerometer, 100);
-      accelerometer.subscribe(({ x, y, z }) => {
-        const magnitude = Math.sqrt(x * x + y * y + z * z);
-        const now = Date.now();
-        if (magnitude > 18 && now - lastShakeRef.current > 200) {
-          lastShakeRef.current = now;
-          shakeCountRef.current += 1;
-          setShakeCount(shakeCountRef.current);
-
-          if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-          shakeTimerRef.current = setTimeout(() => {
-            shakeCountRef.current = 0;
-            setShakeCount(0);
-          }, 2000);
-
-          if (shakeCountRef.current >= 5) {
-            shakeCountRef.current = 0;
-            setShakeCount(0);
-            triggerSOS('shake');
-          }
-        }
-      });
-    } catch (error) {
-      console.log('Accelerometer not available:', error);
-    }
-  };
-
-  // SOS Trigger
-  const triggerSOS = (type = 'button') => {
+  const triggerSOS = async (type = "button") => {
     if (sosActive) return;
     setSosActive(true);
-    Vibration.vibrate([500, 500, 500, 500, 500]);
-    navigation.navigate('SOSAlert', { triggerType: type, user });
+    fetchLocation();
+    Vibration.vibrate([500, 300, 500, 300, 500]);
+    const contacts = await getEmergencyContacts();
+    if (contacts.length === 0) {
+      Alert.alert(
+        "⚠️ No Emergency Contacts",
+        "Please add emergency contacts first.",
+        [
+          {
+            text: "Add Contacts",
+            onPress: () => navigation.navigate("Contacts"),
+          },
+          { text: "Cancel", style: "cancel" },
+        ],
+      );
+      setSosActive(false);
+      return;
+    }
+    sendSMSAlerts(contacts);
+    callAllContacts(contacts);
+    navigation.navigate("SOSAlert", {
+      triggerType: type,
+      user,
+      location,
+      contacts,
+    });
     setTimeout(() => setSosActive(false), 5000);
   };
 
   const handleSOSPress = () => {
     Alert.alert(
-      '🚨 SEND SOS ALERT?',
-      'This will immediately alert the Disha Control Room and your emergency contacts with your current location.',
+      "🚨 SEND SOS ALERT?",
+      "This will:\n\n• 📍 Share your GPS location\n• 📩 SMS all emergency contacts\n• 📞 Call all emergency contacts\n• 🚨 Alert Disha Control Room",
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: "Cancel", style: "cancel" },
         {
-          text: 'SEND SOS NOW',
-          style: 'destructive',
-          onPress: () => triggerSOS('button'),
+          text: "SEND SOS NOW",
+          style: "destructive",
+          onPress: () => triggerSOS("button"),
         },
-      ]
+      ],
     );
   };
 
   const quickActions = [
-    { icon: '👥', label: 'Emergency\nContacts', screen: 'Contacts',  color: '#4CAF50' },
-    { icon: '📍', label: 'Track My\nTravel',    screen: 'Track',     color: '#2196F3' },
-    { icon: '🏥', label: 'Nearby\nServices',    screen: 'Nearby',    color: '#FF9800' },
-    { icon: '📋', label: 'File\nComplaint',     screen: 'Complaint', color: '#9C27B0' },
-    { icon: '📞', label: 'Helplines',           screen: 'Helpline',  color: '#F44336' },
-    { icon: '🩸', label: 'Blood\nBanks',        screen: 'Nearby',    color: '#E91E63' },
+    {
+      icon: "👥",
+      label: "Emergency\nContacts",
+      screen: "Contacts",
+      color: "#4CAF50",
+    },
+    {
+      icon: "📍",
+      label: "Track My\nTravel",
+      screen: "Track",
+      color: "#2196F3",
+    },
+    {
+      icon: "🏥",
+      label: "Nearby\nServices",
+      screen: "Nearby",
+      color: "#FF9800",
+    },
+    {
+      icon: "📋",
+      label: "File\nComplaint",
+      screen: "Complaint",
+      color: "#9C27B0",
+    },
+    { icon: "📞", label: "Helplines", screen: "Helpline", color: "#F44336" },
+    { icon: "🩸", label: "Blood\nBanks", screen: "Nearby", color: "#E91E63" },
+  ];
+
+  const emergencyDials = [
+    { num: "100", lbl: "Police", tel: "100", bg: "#F44336" },
+    { num: "108", lbl: "Ambulance", tel: "108", bg: "#4CAF50" },
+    { num: "112", lbl: "Emergency", tel: "112", bg: "#2196F3" },
+    { num: "181", lbl: "Women Help", tel: "181", bg: "#FF9800" },
+  ];
+
+  const navTabs = [
+    { icon: "H", label: "Home", active: true, screen: "Home" },
+    { icon: "C", label: "Contacts", active: false, screen: "Contacts" },
+    { icon: "T", label: "Track", active: false, screen: "Track" },
+    { icon: "N", label: "Nearby", active: false, screen: "Nearby" },
+    { icon: "F", label: "Complaint", active: false, screen: "Complaint" },
+    { icon: "A", label: "Admin", active: false, screen: "Admin" },
   ];
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>
-            Hello, {user?.name || 'User'} 👋
-          </Text>
-          <Text style={styles.subGreeting}>Stay Safe | Disha App</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.profileBtn}
-          onPress={() => navigation.navigate('Register')}
-        >
-          <Text style={styles.profileIcon}>👤</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Shake Indicator */}
-      {shakeCount > 0 && (
-        <View style={styles.shakeBanner}>
-          <Text style={styles.shakeText}>
-            📳 Shake detected: {shakeCount}/5 — Shake 5 times to trigger SOS!
-          </Text>
-        </View>
-      )}
-
-      {/* SOS Button */}
-      <View style={styles.sosSection}>
-        <Text style={styles.sosHint}>Press in case of emergency</Text>
-        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+    <View style={styles.root}>
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {/* HEADER */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>
+              Hello, {user?.name || "Vennela"} 👋
+            </Text>
+            <Text style={styles.subGreeting}>Stay Safe | Disha App</Text>
+          </View>
           <TouchableOpacity
-            style={[styles.sosButton, sosActive && styles.sosButtonActive]}
-            onPress={handleSOSPress}
-            activeOpacity={0.85}
+            style={styles.avatarBtn}
+            onPress={() => navigation.navigate("Register")}
           >
-            <Text style={styles.sosIcon}>🆘</Text>
-            <Text style={styles.sosText}>SOS</Text>
-            <Text style={styles.sosSubText}>PRESS FOR HELP</Text>
+            <Text style={styles.avatarIcon}>👤</Text>
           </TouchableOpacity>
-        </Animated.View>
-        <Text style={styles.shakeHint}>
-          📳 OR shake phone 5 times quickly
-        </Text>
-      </View>
+        </View>
 
-      {/* Quick Actions */}
-      <View style={styles.quickActionsSection}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.quickActionsGrid}>
-          {quickActions.map((action, index) => (
+        {/* RED SOS SECTION */}
+        <View style={styles.sosSection}>
+          <Text style={styles.sosLabel}>Press in case of emergency</Text>
+          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
             <TouchableOpacity
-              key={index}
-              style={[styles.actionCard, { borderTopColor: action.color }]}
-              onPress={() => navigation.navigate(action.screen)}
+              style={[styles.sosBtn, sosActive && styles.sosBtnActive]}
+              onPress={handleSOSPress}
+              activeOpacity={0.85}
             >
-              <Text style={styles.actionIcon}>{action.icon}</Text>
-              <Text style={styles.actionLabel}>{action.label}</Text>
+              <Text style={styles.sosText}>SOS</Text>
+              <Text style={styles.sosSub}>PRESS FOR HELP</Text>
             </TouchableOpacity>
-          ))}
+          </Animated.View>
+          <Text style={styles.shakeHint}>OR shake phone 5 times quickly</Text>
+          {location ? (
+            <Text style={styles.locationStatus}>
+              📍 GPS Ready — Location will be shared on SOS
+            </Text>
+          ) : (
+            <Text style={styles.locationFetching}>
+              📡 Fetching GPS location...
+            </Text>
+          )}
         </View>
-      </View>
 
-      {/* Emergency Dial Buttons */}
-      <View style={styles.dialSection}>
-        <Text style={styles.sectionTitle}>Emergency Dial</Text>
-        <View style={styles.dialRow}>
-          <TouchableOpacity
-            style={[styles.dialBtn, { backgroundColor: '#F44336' }]}
-            onPress={() => Linking.openURL('tel:100')}
-          >
-            <Text style={styles.dialNumber}>100</Text>
-            <Text style={styles.dialLabel}>Police</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.dialBtn, { backgroundColor: '#4CAF50' }]}
-            onPress={() => Linking.openURL('tel:108')}
-          >
-            <Text style={styles.dialNumber}>108</Text>
-            <Text style={styles.dialLabel}>Ambulance</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.dialBtn, { backgroundColor: '#2196F3' }]}
-            onPress={() => Linking.openURL('tel:112')}
-          >
-            <Text style={styles.dialNumber}>112</Text>
-            <Text style={styles.dialLabel}>Emergency</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.dialBtn, { backgroundColor: '#FF9800' }]}
-            onPress={() => Linking.openURL('tel:181')}
-          >
-            <Text style={styles.dialNumber}>181</Text>
-            <Text style={styles.dialLabel}>Women Help</Text>
-          </TouchableOpacity>
+        {/* QUICK ACTIONS */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <View style={styles.actionsGrid}>
+            {quickActions.map((item, i) => (
+              <TouchableOpacity
+                key={i}
+                style={[styles.actionCard, { borderTopColor: item.color }]}
+                onPress={() => navigation.navigate(item.screen)}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.actionIcon}>{item.icon}</Text>
+                <Text style={styles.actionLabel}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      </View>
 
-      {/* Safety Tips */}
-      <View style={styles.tipsSection}>
-        <Text style={styles.sectionTitle}>Safety Tip 💡</Text>
-        <View style={styles.tipCard}>
-          <Text style={styles.tipText}>
-            Always inform a trusted person about your whereabouts. Use the
-            "Track My Travel" feature when traveling alone at night.
-          </Text>
+        {/* EMERGENCY DIAL */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Emergency Dial</Text>
+          <View style={styles.dialRow}>
+            {emergencyDials.map((d) => (
+              <TouchableOpacity
+                key={d.num}
+                style={[styles.dialBtn, { backgroundColor: d.bg }]}
+                onPress={() => Linking.openURL(`tel:${d.tel}`)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.dialNum}>{d.num}</Text>
+                <Text style={styles.dialLbl}>{d.lbl}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      </View>
 
-      <View style={{ height: 20 }} />
-    </ScrollView>
+        <View style={{ height: 24 }} />
+      </ScrollView>
+
+      {/* BOTTOM NAV */}
+      <View style={styles.navBar}>
+        {navTabs.map((tab) => (
+          <TouchableOpacity
+            key={tab.label}
+            style={styles.navItem}
+            onPress={() => !tab.active && navigation.navigate(tab.screen)}
+            activeOpacity={tab.active ? 1 : 0.7}
+          >
+            <Text style={[styles.navIcon, tab.active && styles.navIconActive]}>
+              {tab.icon}
+            </Text>
+            <Text
+              style={[styles.navLabel, tab.active && styles.navLabelActive]}
+            >
+              {tab.label}
+            </Text>
+            {tab.active && <View style={styles.navDot} />}
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
+  root: { flex: 1, backgroundColor: "#f5f5f5" },
   header: {
-    backgroundColor: '#8B0000',
-    padding: 20,
-    paddingTop: 40,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    backgroundColor: "#fff",
+    paddingTop: 48,
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    elevation: 2,
   },
-  greeting: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: 'bold',
+  greeting: { fontSize: 22, fontWeight: "900", color: "#111" },
+  subGreeting: { fontSize: 13, color: "#888", marginTop: 3 },
+  avatarBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#e0e0e0",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  subGreeting: {
-    color: '#ffcccc',
-    fontSize: 13,
-    marginTop: 3,
-  },
-  profileBtn: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 25,
-    width: 45,
-    height: 45,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileIcon: {
-    fontSize: 22,
-  },
-  shakeBanner: {
-    backgroundColor: '#FF6B6B',
-    padding: 10,
-    alignItems: 'center',
-  },
-  shakeText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 13,
-  },
+  avatarIcon: { fontSize: 22 },
   sosSection: {
-    alignItems: 'center',
-    backgroundColor: '#8B0000',
-    paddingBottom: 40,
-    paddingTop: 10,
+    backgroundColor: "#8B0000",
+    paddingVertical: 36,
+    alignItems: "center",
   },
-  sosHint: {
-    color: '#ffcccc',
-    fontSize: 14,
+  sosLabel: {
+    color: "#ffcccc",
+    fontSize: 15,
+    fontStyle: "italic",
     marginBottom: 20,
+    letterSpacing: 0.5,
   },
-  sosButton: {
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: '#FF0000',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 15,
-    shadowColor: '#FF0000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.6,
-    shadowRadius: 15,
+  sosBtn: {
+    width: SOS_R * 2,
+    height: SOS_R * 2,
+    borderRadius: SOS_R,
+    backgroundColor: "#E53935",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 12,
     borderWidth: 5,
-    borderColor: '#FF6666',
+    borderColor: "rgba(255,255,255,0.2)",
   },
-  sosButtonActive: {
-    backgroundColor: '#CC0000',
-  },
-  sosIcon: {
-    fontSize: 45,
-  },
+  sosBtnActive: { backgroundColor: "#c62828" },
   sosText: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: '900',
-    letterSpacing: 4,
+    fontSize: Math.floor(SOS_R * 0.55),
+    fontWeight: "900",
+    color: "#fff",
+    letterSpacing: 6,
   },
-  sosSubText: {
-    color: '#ffcccc',
+  sosSub: {
     fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 1,
+    color: "rgba(255,255,255,0.8)",
+    letterSpacing: 2,
+    fontWeight: "700",
+    marginTop: 4,
   },
   shakeHint: {
-    color: '#ffcccc',
+    color: "rgba(255,255,255,0.65)",
     fontSize: 13,
     marginTop: 20,
+    fontStyle: "italic",
   },
+  locationStatus: {
+    color: "#a5d6a7",
+    fontSize: 12,
+    marginTop: 8,
+    fontWeight: "600",
+  },
+  locationFetching: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 12,
+    marginTop: 8,
+  },
+  section: { paddingHorizontal: 16, paddingTop: 20 },
   sectionTitle: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#222",
+    marginBottom: 14,
+    fontStyle: "italic",
   },
-  quickActionsSection: {
-    padding: 20,
-  },
-  quickActionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+  actionsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
   },
   actionCard: {
-    width: '30%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 15,
-    alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    width: (SCREEN_WIDTH - 48) / 3,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingVertical: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
     borderTopWidth: 4,
-    flexGrow: 1,
+    elevation: 3,
   },
-  actionIcon: {
-    fontSize: 28,
-    marginBottom: 8,
-  },
+  actionIcon: { fontSize: 28, marginBottom: 8 },
   actionLabel: {
-    fontSize: 12,
-    color: '#555',
-    textAlign: 'center',
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#333",
+    textAlign: "center",
+    lineHeight: 16,
   },
-  dialSection: {
-    paddingHorizontal: 20,
-    paddingBottom: 10,
-  },
-  dialRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
+  dialRow: { flexDirection: "row", justifyContent: "space-between" },
   dialBtn: {
     flex: 1,
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-    elevation: 3,
+    marginHorizontal: 4,
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
   },
-  dialNumber: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  dialLabel: {
-    color: '#fff',
+  dialNum: { color: "#fff", fontSize: 20, fontWeight: "900", letterSpacing: 1 },
+  dialLbl: {
+    color: "rgba(255,255,255,0.9)",
     fontSize: 10,
+    fontWeight: "600",
     marginTop: 3,
-    fontWeight: '600',
   },
-  tipsSection: {
-    padding: 20,
+  navBar: {
+    flexDirection: "row",
+    backgroundColor: "#fff",
+    borderTopWidth: 1.5,
+    borderTopColor: "#eee",
+    paddingBottom: 8,
+    paddingTop: 6,
+    elevation: 12,
   },
-  tipCard: {
-    backgroundColor: '#FFF3E0',
-    borderRadius: 12,
-    padding: 15,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF9800',
+  navItem: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 4,
+    position: "relative",
   },
-  tipText: {
-    color: '#555',
-    fontSize: 14,
-    lineHeight: 22,
+  navIcon: { fontSize: 16, fontWeight: "800", color: "#aaa" },
+  navIconActive: { color: "#8B0000" },
+  navLabel: { fontSize: 9, color: "#aaa", marginTop: 2, fontWeight: "500" },
+  navLabelActive: { color: "#8B0000", fontWeight: "700" },
+  navDot: {
+    position: "absolute",
+    top: 0,
+    width: 24,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: "#8B0000",
   },
 });
 
